@@ -25,3 +25,17 @@ body {
     background: #00ffcc;
     width: 0%;
 }
+
+.signal.long {
+    color: #28a745;
+    font-weight: bold;
+}
+
+.signal.short {
+    color: #dc3545;
+    font-weight: bold;
+}
+
+.signal {
+    text-transform: uppercase;
+}

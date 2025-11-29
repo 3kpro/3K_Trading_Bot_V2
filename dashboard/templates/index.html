@@ -10,13 +10,16 @@
 <h1>3K Trading Bot Dashboard</h1>
 
 <div class="card">
-    <h2>Status</h2>
+    <h2>Live Status</h2>
     <p><strong>Symbol:</strong> <span id="symbol"></span></p>
-    <p><strong>Last Price:</strong> <span id="price"></span></p>
-    <p><strong>Signal:</strong> <span id="signal"></span></p>
-    <p><strong>Equity:</strong> <span id="equity"></span></p>
-    <p><strong>RSI:</strong> <span id="rsi"></span></p>
-    <p><strong>ATR:</strong> <span id="atr"></span></p>
+    <p><strong>Last Price:</strong> $<span id="price"></span></p>
+    <p><strong>Signal:</strong> <span id="signal" class="signal"></span> <span title="Current trading signal: long (buy), short (sell), or none">(?)</span></p>
+    <p><strong>Equity:</strong> $<span id="equity"></span></p>
+    <p><strong>RSI:</strong> <span id="rsi"></span> <span title="Relative Strength Index - momentum indicator">(?)</span></p>
+    <p><strong>ATR:</strong> <span id="atr"></span> <span title="Average True Range - volatility measure">(?)</span></p>
+    <p><strong>Donchian Upper:</strong> $<span id="donchian_upper"></span></p>
+    <p><strong>Donchian Lower:</strong> $<span id="donchian_lower"></span></p>
+    <p><small>Last Update: <span id="last_update"></span></small></p>
 </div>
 
 <div class="card">
@@ -32,6 +35,15 @@
     <canvas id="equityChart"></canvas>
 </div>
 
+<div class="card">
+    <h2>How It Works</h2>
+    <p><strong>Strategy:</strong> Donchian Channel Breakout with ATR stops and RSI filter.</p>
+    <p><strong>Entry:</strong> Buy when price breaks above upper channel, sell when below lower (RSI 35-70).</p>
+    <p><strong>Exit:</strong> Stop loss at 2x ATR from entry price.</p>
+    <p><strong>Risk:</strong> 0.5% of equity per trade.</p>
+    <p><small>This is paper trading - no real money at risk.</small></p>
+</div>
+
 <script>
 let chart;
 
@@ -41,15 +53,20 @@ function fetchState() {
         .then(data => {
             document.getElementById("symbol").innerText = data.symbol;
             document.getElementById("price").innerText = data.last_price.toFixed(2);
-            document.getElementById("signal").innerText = data.signal || "None";
+            let signalEl = document.getElementById("signal");
+            signalEl.innerText = data.signal || "None";
+            signalEl.className = "signal " + (data.signal === "long" ? "long" : data.signal === "short" ? "short" : "");
             document.getElementById("equity").innerText = data.equity.toFixed(2);
             document.getElementById("rsi").innerText = data.rsi.toFixed(2);
-            document.getElementById("atr").innerText = data.atr.toFixed(2);
+            document.getElementById("atr").innerText = data.atr.toFixed(4);
+            document.getElementById("donchian_upper").innerText = data.donchian_upper.toFixed(2);
+            document.getElementById("donchian_lower").innerText = data.donchian_lower.toFixed(2);
+            document.getElementById("last_update").innerText = new Date(data.last_update).toLocaleTimeString();
 
             // progress bar
             let pct = data.warmup_progress * 100;
             document.getElementById("progress-bar").style.width = pct + "%";
-            document.getElementById("ready-text").innerText = 
+            document.getElementById("ready-text").innerText =
                 data.ready ? "READY TO TRADE" : "WARMING UP...";
 
             // update chart
