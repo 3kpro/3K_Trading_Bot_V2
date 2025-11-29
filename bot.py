@@ -233,7 +233,8 @@ def generate_signal_for_symbol(
       - Stop = close -/+ 2 * ATR
       - Size = (equity * risk_frac) / (close - stop)
     """
-    if len(df) < max(config.donchian_lookback, config.atr_period, config.rsi_period):
+    required = max(config.donchian_lookback, config.atr_period, config.rsi_period)
+    if len(df) < required + 1:
         log.debug("%s: not enough data for indicators", symbol)
         return None
 
@@ -246,10 +247,11 @@ def generate_signal_for_symbol(
     rsi_series = rsi(closes, config.rsi_period)
 
     last = df.iloc[-1]
-    last_upper = upper.iloc[-1]
-    last_lower = lower.iloc[-1]
-    last_atr = atr_series.iloc[-1]
-    last_rsi = rsi_series.iloc[-1]
+    # Use the previous fully formed bar for indicator thresholds to avoid lookahead bias.
+    last_upper = upper.iloc[-2]
+    last_lower = lower.iloc[-2]
+    last_atr = atr_series.iloc[-2]
+    last_rsi = rsi_series.iloc[-2]
 
     if np.isnan([last_upper, last_lower, last_atr, last_rsi]).any():
         log.debug("%s: indicators not ready (NaN)", symbol)
@@ -299,6 +301,51 @@ def generate_signal_for_symbol(
 # Backtest engine (simple)
 # ---------------------------
 
+@dataclasses.dataclass
+class BacktestStats:
+    total_pnl: float
+    total_return: float
+    win_rate: float
+    profit_factor: float
+    max_drawdown: float
+    num_trades: int
+
+
+def compute_backtest_stats(
+    trades: List[Dict[str, Any]], start_equity: float, equity_curve: List[float]
+) -> BacktestStats:
+    """Compute richer performance metrics for masterclass-grade reporting."""
+
+    realized = [t for t in trades if "pnl" in t]
+    wins = [t for t in realized if t["pnl"] > 0]
+    losses = [t for t in realized if t["pnl"] < 0]
+
+    profit = sum(t["pnl"] for t in wins)
+    loss = abs(sum(t["pnl"] for t in losses))
+
+    profit_factor = profit / loss if loss > 0 else float("inf") if profit > 0 else 0.0
+    win_rate = len(wins) / len(realized) if realized else 0.0
+
+    total_pnl = sum(t.get("pnl", 0.0) for t in realized)
+    total_return = total_pnl / start_equity if start_equity else 0.0
+
+    max_equity = start_equity
+    max_drawdown = 0.0
+    for eq in equity_curve:
+        max_equity = max(max_equity, eq)
+        if max_equity:
+            dd = (max_equity - eq) / max_equity
+            max_drawdown = max(max_drawdown, dd)
+
+    return BacktestStats(
+        total_pnl=total_pnl,
+        total_return=total_return,
+        win_rate=win_rate,
+        profit_factor=profit_factor,
+        max_drawdown=max_drawdown,
+        num_trades=len(realized),
+    )
+
 def backtest_symbol(
     exchange: ccxt.Exchange,
     symbol: str,
@@ -327,6 +374,7 @@ def backtest_symbol(
     stop_price = 0.0
     size = 0.0
     trades: List[Dict[str, Any]] = []
+    equity_curve: List[float] = [equity]
 
     for ts, row in df.iterrows():
         price = float(row["close"])
@@ -355,6 +403,7 @@ def backtest_symbol(
                 )
                 in_position = False
                 side = None
+                equity_curve.append(equity)
             elif side == "short" and price >= stop_price:
                 pnl = (entry_price - price) * size
                 equity += pnl
@@ -370,6 +419,7 @@ def backtest_symbol(
                 )
                 in_position = False
                 side = None
+                equity_curve.append(equity)
 
         # Entry logic
         if not in_position:
@@ -405,14 +455,18 @@ def backtest_symbol(
                 }
             )
 
-    total_pnl = sum(t.get("pnl", 0.0) for t in trades)
+    # extend equity curve to cover final equity for readability
+    equity_curve.append(equity)
+
+    stats = compute_backtest_stats(trades, config.equity, equity_curve)
     return {
         "symbol": symbol,
         "start_equity": config.equity,
         "end_equity": equity,
-        "total_pnl": total_pnl,
-        "num_trades": len([t for t in trades if "exit_time" in t]),
+        "total_pnl": stats.total_pnl,
+        "num_trades": stats.num_trades,
         "trades": trades,
+        "stats": stats,
     }
 
 
@@ -580,17 +634,27 @@ def main() -> None:
             res = backtest_symbol(exchange, symbol, config)
             results.append(res)
             log.info(
-                "%s | start=%.2f end=%.2f pnl=%.2f trades=%d",
+                "%s | start=%.2f end=%.2f pnl=%.2f trades=%d win_rate=%.1f%% pf=%.2f max_dd=%.2f%%",
                 symbol,
                 res["start_equity"],
                 res["end_equity"],
                 res["total_pnl"],
                 res["num_trades"],
+                res["stats"].win_rate * 100,
+                res["stats"].profit_factor,
+                res["stats"].max_drawdown * 100,
             )
 
         # Very simple combined summary
         total_pnl = sum(r["total_pnl"] for r in results)
-        log.info("Backtest complete. Total PnL across symbols: %.2f", total_pnl)
+        avg_win_rate = (
+            sum(r["stats"].win_rate for r in results) / len(results) if results else 0.0
+        )
+        log.info(
+            "Backtest complete. Total PnL across symbols: %.2f | Avg win rate: %.1f%%",
+            total_pnl,
+            avg_win_rate * 100,
+        )
     else:
         run_loop(exchange, config)
 

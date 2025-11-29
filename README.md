@@ -10,6 +10,7 @@ A professional-grade cryptocurrency trading bot implementing a Donchian channel 
 
 - **Strategy**: Donchian breakout with ATR stops and RSI filter
 - **Backtesting**: Parameter optimization and walk-forward analysis
+- **Performance Analytics**: Win rate, profit factor, and drawdown metrics for each backtest run
 - **Trading Modes**: Paper (simulation), Live (real money)
 - **Risk Management**: Position sizing, circuit breakers, drawdown control
 - **Multi-Symbol**: Trade multiple pairs simultaneously
