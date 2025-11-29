@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>3K Trading Bot Dashboard</title>
+    <style>
+        body { font-family: Arial; margin: 20px; }
+        .card { background: #f0f0f0; padding: 20px; margin: 10px; border-radius: 8px; }
+    </style>
+</head>
+<body>
+    <h1>3K Trading Bot Dashboard</h1>
+    <div class="card">
+        <h2>Ready for Real Money Trading?</h2>
+        <p>ETA: <span id="etaDisplay">Calculating...</span></p>
+        <div style="background: #ccc; height: 20px; border-radius: 10px;">
+            <div id="progress-bar" style="background: green; height: 20px; width: 0%; border-radius: 10px;"></div>
+        </div>
+        <p id="readinessStatus">Bot is learning...</p>
+    </div>
+    <div class="card">
+        <h2>Status</h2>
+        <p>Symbol: <span id="symbol"></span></p>
+        <p>Price: $<span id="price"></span></p>
+        <p>Equity: $<span id="equity"></span></p>
+    </div>
+    <script>
+        async function fetchState() {
+            try {
+                const response = await fetch('/state');
+                const data = await response.json();
+                document.getElementById('symbol').textContent = data.symbol;
+                document.getElementById('price').textContent = data.last_price.toFixed(2);
+                document.getElementById('equity').textContent = data.equity.toFixed(2);
+                if (data.readiness) {
+                    document.getElementById('etaDisplay').textContent = data.readiness.eta_readable;
+                    document.getElementById('progress-bar').style.width = data.readiness.score_pct + '%';
+                    document.getElementById('readinessStatus').textContent = data.readiness.can_trade_live ? 'Ready for live trading!' : 'Still learning...';
+                }
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+        fetchState();
+        setInterval(fetchState, 2000);
+    </script>
+</body>
+</html>
