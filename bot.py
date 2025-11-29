@@ -20,11 +20,13 @@ import os
 import sys
 import time
 from datetime import datetime, timezone
+from threading import Thread
 from typing import List, Literal, Optional, Dict, Any, Tuple
 
 import ccxt  # type: ignore
 import numpy as np
 import pandas as pd
+from flask import Flask, jsonify  # type: ignore
 
 
 # ---------------------------
@@ -511,6 +513,40 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def create_dashboard(config: BotConfig) -> Flask:
+    """Create a simple web dashboard."""
+    app = Flask(__name__)
+
+    @app.route('/')
+    def index():
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>3K Trading Bot Dashboard</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                .status {{ background: #f0f0f0; padding: 20px; border-radius: 8px; }}
+            </style>
+        </head>
+        <body>
+            <h1>3K Trading Bot Dashboard</h1>
+            <div class="status">
+                <h2>Status</h2>
+                <p>Mode: {config.mode}</p>
+                <p>Symbols: {', '.join(config.symbols)}</p>
+                <p>Timeframe: {config.timeframe}</p>
+                <p>Equity: ${config.equity}</p>
+                <p>Risk Fraction: {config.risk_frac}</p>
+            </div>
+        </body>
+        </html>
+        """
+        return html
+
+    return app
+
+
 def main() -> None:
     args = parse_args()
 
@@ -535,6 +571,12 @@ def main() -> None:
         config.risk_frac = args.risk_frac
 
     exchange = create_exchange(config)
+
+    # Start dashboard if not backtest
+    if not args.backtest:
+        app = create_dashboard(config)
+        Thread(target=lambda: app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False), daemon=True).start()
+        log.info("Dashboard available at http://localhost:5000")
 
     if mode == "backtest":
         results = []
