@@ -86,8 +86,8 @@ def load_config(mode: str) -> BotConfig:
     donchian_lookback = int(os.getenv("DONCHIAN_LOOKBACK", "20"))
     atr_period = int(os.getenv("ATR_PERIOD", "14"))
     rsi_period = int(os.getenv("RSI_PERIOD", "14"))
-    rsi_min = float(os.getenv("RSI_MIN", "35"))
-    rsi_max = float(os.getenv("RSI_MAX", "70"))
+    rsi_min = float(os.getenv("RSI_MIN", "0"))
+    rsi_max = float(os.getenv("RSI_MAX", "100"))
 
     symbols = [s.strip() for s in symbols_raw.split(",") if s.strip()]
 
