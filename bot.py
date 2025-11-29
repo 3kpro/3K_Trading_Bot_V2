@@ -72,13 +72,13 @@ class BotConfig:
     rsi_min: float
     rsi_max: float
     mode: Literal["backtest", "paper", "live"]
-    sleep_seconds: int = 60
+    sleep_seconds: int = 10
 
 
 def load_config(mode: str) -> BotConfig:
     """Load config from environment variables with sane defaults."""
     exchange_id = os.getenv("EXCHANGE", "kraken").lower()
-    symbols_raw = os.getenv("SYMBOLS", "BTC/USDT")
+    symbols_raw = os.getenv("SYMBOLS", "SOL/USD")
     timeframe = os.getenv("TIMEFRAME", "1h")
     equity = float(os.getenv("EQUITY", "1000"))
     risk_frac = float(os.getenv("RISK_FRAC", "0.005"))
@@ -106,7 +106,7 @@ def load_config(mode: str) -> BotConfig:
         rsi_min=rsi_min,
         rsi_max=rsi_max,
         mode=mode,  # type: ignore
-        sleep_seconds=int(os.getenv("SLEEP_SECONDS", "60")),
+        sleep_seconds=int(os.getenv("SLEEP_SECONDS", "10")),
     )
 
     log.info("Loaded config: %s", cfg)
