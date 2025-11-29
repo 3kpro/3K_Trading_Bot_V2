@@ -1,68 +1,144 @@
-# Trading Bot
+# 3K Trading Bot V2.1
 
-A cryptocurrency trading bot using Donchian breakout strategy with ATR stops, RSI filter, and ML augmentation. Supports backtesting, paper/live trading, multi-symbol, and web dashboard.
+A professional-grade cryptocurrency trading bot implementing a Donchian channel breakout strategy with ATR-based stops, RSI regime filtering, and comprehensive risk management. Supports backtesting, paper trading, live trading, multi-symbol operations, and a real-time web dashboard.
 
-## Features
+## 🚀 Features
 
-- Donchian channel breakout strategy
-- ATR-based stops and position sizing
-- RSI regime filter
-- ML signal augmentation with RandomForest
-- Multi-symbol support
-- Risk management with dynamic sizing and circuit breakers
-- Parameter optimization and walk-forward backtesting
-- Web dashboard for monitoring
-- Telegram notifications
-- Encrypted key storage with keyring
-- Docker containerization
+- **Strategy**: Donchian breakout with ATR stops and RSI filter
+- **Backtesting**: Parameter optimization and walk-forward analysis
+- **Trading Modes**: Paper (simulation), Live (real money)
+- **Risk Management**: Position sizing, circuit breakers, drawdown control
+- **Multi-Symbol**: Trade multiple pairs simultaneously
+- **Web Dashboard**: Real-time monitoring with charts and readiness score
+- **Logging & Notifications**: Structured logging and Telegram alerts
+- **Docker Support**: Containerized deployment
+- **Type Safety**: Full type hints for reliability
 
-## Requirements
+## 📊 Architecture
+
+```
+3K_Trading_Bot_V2/
+├── bot.py              # CLI entry point & main loop
+├── config.py           # Configuration management
+├── data.py             # Data fetching & indicators
+├── strategy.py         # Signal generation logic
+├── execution.py        # Order routing & position tracking
+├── risk.py             # Sizing & risk controls
+├── report.py           # Performance reporting
+├── status.py           # Health checks
+├── targets.py          # Symbol watchlists
+├── watch_targets.py    # Alert monitoring
+├── requirements.txt
+├── Dockerfile
+├── tests/              # Unit & integration tests
+└── reports/            # Generated reports & logs
+```
+
+## 🛠️ Requirements
 
 - Python 3.9+
-- See requirements.txt for packages
+- Dependencies: `pip install -r requirements.txt`
 
-## Installation
+## ⚙️ Installation
 
-1. Clone the repo
-2. Install dependencies: `pip install -r requirements.txt`
-3. Set environment variables or use keyring for keys
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/3kpro/3K_Trading_Bot_V2.git
+   cd 3K_Trading_Bot_V2
+   ```
 
-## Configuration
+2. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-Set the following in .env or via keyring:
+3. **Configure environment**
+   Create a `.env` file or set environment variables:
+   ```env
+   EXCHANGE=kraken
+   SYMBOLS=BTC/USDT,ETH/USDT
+   TIMEFRAME=1h
+   EQUITY=1000
+   RISK_FRAC=0.005
+   API_KEY=your_api_key
+   API_SECRET=your_api_secret
+   TELEGRAM_BOT_TOKEN=your_bot_token
+   TELEGRAM_CHAT_ID=your_chat_id
+   ```
 
-- EXCHANGE: e.g., kraken
-- SYMBOLS: comma-separated, e.g., SOL/USD,BTC/USD
-- TIMEFRAME: e.g., 1h
-- RISK_FRAC: e.g., 0.005
-- EQUITY: e.g., 1000
-- TELEGRAM_BOT_TOKEN
-- TELEGRAM_CHAT_ID
+## 🎯 Usage
 
-For keyring: `python -c "import keyring; keyring.set_password('trading_bot', 'api_key', 'your_key')"`
+### Backtesting
+```bash
+# Basic backtest
+python bot.py --backtest
 
-## Usage
+# With walk-forward analysis
+python bot.py --backtest --walkforward
 
-### Backtest
-`python bot.py --backtest`
+# Override parameters
+python bot.py --backtest --symbols BTC/USDT --timeframe 4h
+```
 
-With walk-forward: `python bot.py --backtest --walkforward`
-
-### Paper Trading
-`python bot.py`
+### Paper Trading (Simulation)
+```bash
+python bot.py
+```
 
 ### Live Trading
-`python bot.py --live`
+```bash
+python bot.py --live
+```
 
 ### Web Dashboard
-Access http://localhost:5000 after starting the bot.
+Start the bot and visit `http://localhost:5000` for real-time monitoring.
 
-## Docker
+## 📈 Strategy Details
 
-Build: `docker build -t trading-bot .`
+- **Entry**: Close breaks above/below Donchian channel (20-period)
+- **Filter**: RSI between 35-70
+- **Stop Loss**: 2x ATR from entry
+- **Position Sizing**: Risk 0.5% of equity per trade
+- **Exit**: Stop hit or opposite breakout
 
-Run: `docker run --env-file .env trading-bot python bot.py --live`
+## 🐳 Docker
 
-## Disclaimer
+```bash
+# Build
+docker build -t 3k-trading-bot .
 
-This is for educational purposes. Trading involves risk. Use at your own risk.
+# Run paper trading
+docker run --env-file .env 3k-trading-bot
+
+# Run live trading
+docker run --env-file .env 3k-trading-bot python bot.py --live
+```
+
+## 🧪 Testing
+
+```bash
+pytest tests/
+```
+
+## 📊 Monitoring
+
+- **Dashboard**: Real-time equity chart, position status, trade history
+- **Readiness Score**: Checklist for live trading readiness
+- **Logs**: Structured logging to console and files
+- **Telegram**: Trade notifications and alerts
+
+## ⚠️ Disclaimer
+
+This software is for educational and research purposes only. Trading cryptocurrencies involves substantial risk of loss and is not suitable for all investors. Past performance does not guarantee future results. Use at your own risk.
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Ensure all tests pass
+5. Submit a pull request
+
+## 📄 License
+
+MIT License - see LICENSE file for details.
