@@ -8,6 +8,7 @@
 <body>
 
 <h1>3K Trading Bot Dashboard</h1>
+<p><strong>Status:</strong> <span id="bot_status" style="color: #00ffcc;">ACTIVE</span> | <strong>Current Time:</strong> <span id="current_time"></span></p>
 
 <div class="card">
     <h2>Live Status</h2>
@@ -28,6 +29,7 @@
         <div id="progress-bar"></div>
     </div>
     <p id="ready-text"></p>
+    <p><small>Bot scans for signals every 10 seconds</small></p>
 </div>
 
 <div class="card">
@@ -69,6 +71,13 @@ function fetchState() {
             document.getElementById("ready-text").innerText =
                 data.ready ? "READY TO TRADE" : "WARMING UP...";
 
+            // animate progress if not ready
+            if (!data.ready) {
+                document.getElementById("progress-bar").style.animation = "pulse 1s infinite";
+            } else {
+                document.getElementById("progress-bar").style.animation = "";
+            }
+
             // update chart
             if (chart) {
                 chart.data.labels = data.equity_history.map((_, i) => i);
@@ -100,6 +109,12 @@ function initChart() {
 
 initChart();
 setInterval(fetchState, 2000);
+setInterval(updateTime, 1000);
+updateTime(); // initial call
+
+function updateTime() {
+    document.getElementById("current_time").innerText = new Date().toLocaleTimeString();
+}
 </script>
 
 </body>
