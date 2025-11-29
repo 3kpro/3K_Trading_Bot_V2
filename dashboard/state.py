@@ -42,3 +42,9 @@ class DashboardState:
 
 # Global singleton
 state = DashboardState()
+state.equity = 1000.0
+state.equity_history = [1000.0]
+state.symbol = "BTC/USDT"
+state.last_price = 50000.0
+state.ready = False
+state.warmup_progress = 0.0
