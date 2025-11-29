@@ -100,17 +100,27 @@ class DashboardState:
 
     def _estimate_eta_hours(self) -> float:
         """Estimate hours until bot is ready (simple heuristic)."""
-        if self.ready:
-            return 0.0
+        eta = 0.0
 
         # Warmup progress (assume ~2 hours to full warmup)
-        warmup_eta = (1.0 - self.warmup_progress) * 2.0
+        if self.warmup_progress < 1.0:
+            eta += (1.0 - self.warmup_progress) * 2.0
 
         # Trade requirement (assuming ~1 trade per hour in typical conditions)
-        trades_needed = max(0, 10 - self.total_trades)
-        trades_eta = trades_needed * 1.0
+        if self.total_trades < 10:
+            eta += (10 - self.total_trades) * 1.0
 
-        return round(max(warmup_eta, trades_eta), 1)
+        # Performance requirements (rough estimates)
+        if self._calculate_expectancy() <= 0:
+            eta += 2.0  # Time to accumulate positive expectancy
+
+        if self._calculate_win_rate() < 0.45:
+            eta += 3.0  # Time to improve win rate
+
+        if abs(self._calculate_max_drawdown()) >= 0.15:
+            eta += 4.0  # Time to reduce drawdown
+
+        return round(eta, 1)
 
     def _format_eta(self) -> str:
         """Format ETA as human-readable string."""
