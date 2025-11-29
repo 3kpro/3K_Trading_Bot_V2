@@ -2,7 +2,7 @@ from flask import Flask, jsonify, render_template_string
 from dashboard.state import state
 import os
 
-app = Flask(__name__,
+app = Flask(__name__, 
             template_folder='dashboard',
             static_folder='static')
 
@@ -324,313 +324,37 @@ DASHBOARD_HTML = """
                 grid-template-columns: 1fr;
             }
         }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <header>
-            <h1>🤖 3K Trading Bot</h1>
-            <span id="modeDisplay" class="mode-badge paper">Paper Trading</span>
-        </header>
 
-        <!-- READINESS SECTION -->
-        <div class="readiness-card">
-            <h2>📊 Live Trading Readiness</h2>
-            <div class="eta-container">
-                <div class="score-circle" id="scoreCircle" style="--score: 0">0</div>
-                <div style="flex: 1;">
-                    <div class="eta-value">
-                        <div class="eta-label">Estimated Time to Ready</div>
-                        <div class="eta-text" id="etaDisplay">Calculating...</div>
-                    </div>
-                    <div style="margin-top: 12px; font-size: 13px; color: #90a4ae;">
-                        <span id="readinessStatus">Warming up...</span>
-                    </div>
-                </div>
-            </div>
-            <div class="readiness-checks" id="readinessChecks"></div>
-        </div>
+        function updateActivity(data) {
+            const activityLog = document.getElementById('activityLog');
+            activityLog.innerHTML = '';
 
-        <!-- STATS GRID -->
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-label">Current Equity</div>
-                <div class="stat-value" id="statEquity">$0.00</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Last Price</div>
-                <div class="stat-value neutral" id="statPrice">0.00</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Current RSI</div>
-                <div class="stat-value neutral" id="statRSI">--</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Current ATR</div>
-                <div class="stat-value neutral" id="statATR">--</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Closed Trades</div>
-                <div class="stat-value neutral" id="statTrades">0</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Win Rate</div>
-                <div class="stat-value neutral" id="statWinRate">--</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Total PnL</div>
-                <div class="stat-value" id="statPnL">$0.00</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Max Drawdown</div>
-                <div class="stat-value negative" id="statDD">--</div>
-            </div>
-        </div>
+            // Add current status
+            const statusEntry = document.createElement('div');
+            statusEntry.className = 'log-entry';
+            statusEntry.innerHTML = `
+                <div class="log-timestamp">${new Date().toLocaleTimeString()}</div>
+                <div class="log-message">Bot is watching ${data.symbol} for good trades...</div>
+            `;
+            activityLog.appendChild(statusEntry);
 
-        <!-- CHARTS -->
-        <div class="charts-grid">
-            <div class="chart-container">
-                <h3>📈 Equity Curve</h3>
-                <div class="chart-wrapper">
-                    <canvas id="equityChart"></canvas>
-                </div>
-            </div>
+            // Add recent signals from history
+            if (data.signal_history && data.timestamp_history) {
+                const recentSignals = data.signal_history.slice(-3);
+                const recentTimes = data.timestamp_history.slice(-3);
 
-            <div class="chart-container">
-                <h3>💹 Price & Channels</h3>
-                <div class="chart-wrapper">
-                    <canvas id="priceChart"></canvas>
-                </div>
-            </div>
-
-            <div class="chart-container">
-                <h3>📊 RSI Indicator</h3>
-                <div class="chart-wrapper">
-                    <canvas id="rsiChart"></canvas>
-                </div>
-            </div>
-
-            <div class="chart-container">
-                <h3>🎯 ATR Volatility</h3>
-                <div class="chart-wrapper">
-                    <canvas id="atrChart"></canvas>
-                </div>
-            </div>
-        </div>
-
-        <!-- ACTIVITY LOG -->
-        <div class="activity-section">
-            <h3>📋 Live Activity Feed</h3>
-            <div class="activity-log" id="activityLog">
-                <div class="log-entry">
-                    <div class="log-timestamp">Now</div>
-                    <div class="log-message">Dashboard initialized. Waiting for bot data...</div>
-                </div>
-            </div>
-        </div>
-
-        <footer>
-            <p>Real-time dashboard for 3K Trading Bot | Last update: <span id="lastUpdate">--</span></p>
-        </footer>
-    </div>
-
-    <script>
-        let charts = {};
-
-        const chartConfig = {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    labels: {
-                        color: '#e4e6eb',
-                        font: { size: 11 }
+                for (let i = recentSignals.length - 1; i >= 0; i--) {
+                    if (recentSignals[i]) {
+                        const signalEntry = document.createElement('div');
+                        signalEntry.className = `log-entry signal-${recentSignals[i].toLowerCase()}`;
+                        const action = recentSignals[i] === 'long' ? 'buy' : 'sell';
+                        signalEntry.innerHTML = `
+                            <div class="log-timestamp">${new Date(recentTimes[i]).toLocaleTimeString()}</div>
+                            <div class="log-message">Bot wants to ${action} ${data.symbol}</div>
+                        `;
+                        activityLog.appendChild(signalEntry);
                     }
                 }
-            },
-            scales: {
-                x: {
-                    grid: { color: 'rgba(255,255,255,0.05)' },
-                    ticks: { color: '#90a4ae' }
-                },
-                y: {
-                    grid: { color: 'rgba(255,255,255,0.05)' },
-                    ticks: { color: '#90a4ae' }
-                }
-            }
-        };
-
-        function initCharts() {
-            charts.equity = new Chart(document.getElementById('equityChart'), {
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        label: 'Equity',
-                        data: [],
-                        borderColor: '#4caf50',
-                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
-                        borderWidth: 2,
-                        fill: true,
-                        tension: 0.4,
-                        pointRadius: 0,
-                        pointHoverRadius: 6
-                    }]
-                },
-                options: { ...chartConfig }
-            });
-
-            charts.price = new Chart(document.getElementById('priceChart'), {
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [
-                        {
-                            label: 'Price',
-                            data: [],
-                            borderColor: '#2196f3',
-                            borderWidth: 2,
-                            tension: 0.4,
-                            pointRadius: 0
-                        },
-                        {
-                            label: 'Donchian Upper',
-                            data: [],
-                            borderColor: '#f44336',
-                            borderWidth: 1,
-                            borderDash: [5, 5],
-                            tension: 0.4,
-                            pointRadius: 0
-                        },
-                        {
-                            label: 'Donchian Lower',
-                            data: [],
-                            borderColor: '#4caf50',
-                            borderWidth: 1,
-                            borderDash: [5, 5],
-                            tension: 0.4,
-                            pointRadius: 0
-                        }
-                    ]
-                },
-                options: { ...chartConfig }
-            });
-
-            charts.rsi = new Chart(document.getElementById('rsiChart'), {
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        label: 'RSI(14)',
-                        data: [],
-                        borderColor: '#ffb74d',
-                        backgroundColor: 'rgba(255, 183, 77, 0.1)',
-                        borderWidth: 2,
-                        fill: true,
-                        tension: 0.4,
-                        pointRadius: 0
-                    }]
-                },
-                options: {
-                    ...chartConfig,
-                    scales: {
-                        ...chartConfig.scales,
-                        y: {
-                            ...chartConfig.scales.y,
-                            min: 0,
-                            max: 100
-                        }
-                    }
-                }
-            });
-
-            charts.atr = new Chart(document.getElementById('atrChart'), {
-                type: 'bar',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        label: 'ATR(14)',
-                        data: [],
-                        backgroundColor: 'rgba(103, 58, 183, 0.6)',
-                        borderColor: '#673ab7',
-                        borderWidth: 1
-                    }]
-                },
-                options: { ...chartConfig }
-            });
-        }
-
-        async function fetchState() {
-            try {
-                const response = await fetch('/state');
-                const data = await response.json();
-                updateDashboard(data);
-            } catch (error) {
-                console.error('Failed to fetch state:', error);
-            }
-        }
-
-        function updateDashboard(data) {
-            document.getElementById('statEquity').textContent = `$${data.equity.toFixed(2)}`;
-            document.getElementById('statPrice').textContent = data.last_price.toFixed(6);
-            document.getElementById('statRSI').textContent = data.rsi.toFixed(1);
-            document.getElementById('statATR').textContent = data.atr.toFixed(6);
-            document.getElementById('statTrades').textContent = data.total_trades;
-            document.getElementById('statWinRate').textContent = `${data.win_rate_pct.toFixed(1)}%`;
-            document.getElementById('statPnL').textContent = `$${data.expectancy.toFixed(2)}`;
-            document.getElementById('statDD').textContent = `${data.max_drawdown_pct.toFixed(2)}%`;
-
-            const pnlEl = document.getElementById('statPnL');
-            if (data.expectancy > 0) {
-                pnlEl.className = 'stat-value positive';
-            } else if (data.expectancy < 0) {
-                pnlEl.className = 'stat-value negative';
-            } else {
-                pnlEl.className = 'stat-value neutral';
-            }
-
-            const modeEl = document.getElementById('modeDisplay');
-            if (data.mode.live) {
-                modeEl.className = 'mode-badge live';
-                modeEl.textContent = '🔴 Live Trading';
-            } else if (data.mode.backtest) {
-                modeEl.className = 'mode-badge backtest';
-                modeEl.textContent = '📊 Backtest';
-            } else {
-                modeEl.className = 'mode-badge paper';
-                modeEl.textContent = '📋 Paper Trading';
-            }
-
-            updateReadiness(data.readiness);
-            updateCharts(data);
-
-            document.getElementById('lastUpdate').textContent = new Date(data.last_update).toLocaleTimeString();
-        }
-
-        function updateReadiness(readiness) {
-            const scoreCircle = document.getElementById('scoreCircle');
-            scoreCircle.style.setProperty('--score', readiness.score_pct);
-            scoreCircle.textContent = Math.round(readiness.score_pct);
-
-            document.getElementById('etaDisplay').textContent = readiness.eta_readable;
-
-            let statusText = `${readiness.passed}/${readiness.total} checks passed`;
-            if (readiness.can_trade_live) {
-                statusText += ' ✅ Ready for live trading!';
-            }
-            document.getElementById('readinessStatus').textContent = statusText;
-
-            const checksContainer = document.getElementById('readinessChecks');
-            checksContainer.innerHTML = '';
-
-            for (const [check, passed] of Object.entries(readiness.checks)) {
-                const checkEl = document.createElement('div');
-                checkEl.className = `check-item ${passed ? 'pass' : 'fail'}`;
-                checkEl.innerHTML = `
-                    <span class="check-icon">${passed ? '✓' : '✗'}</span>
-                    <span>${check.replace(/_/g, ' ')}</span>
-                `;
-                checksContainer.appendChild(checkEl);
             }
         }
 
