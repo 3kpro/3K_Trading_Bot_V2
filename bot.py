@@ -431,15 +431,22 @@ def run_loop(exchange: ccxt.Exchange, config: BotConfig) -> None:
     log.info("Starting %s mode loop", config.mode)
     dry_run = config.mode != "live"
 
+    # *** NEW: Set mode flags for dashboard
+    state.backtest_mode = (config.mode == "backtest")
+    state.paper_mode = (config.mode == "paper")
+    state.live_mode = (config.mode == "live")
+    state.start_time = datetime.now(timezone.utc)
+
     while True:
         for symbol in config.symbols:
             try:
                 df = fetch_ohlcv_df(exchange, symbol, config.timeframe, limit=200)
 
-                # Update state
+                # *** NEW: Update dashboard state with warmup progress
                 state.symbol = symbol
                 state.warmup_progress = min(1.0, len(df) / 50)
                 state.ready = state.warmup_progress >= 1.0
+                state.last_update = datetime.now(timezone.utc)
 
                 if len(df) >= max(config.donchian_lookback, config.atr_period, config.rsi_period):
                     highs = df["high"]
@@ -449,15 +456,33 @@ def run_loop(exchange: ccxt.Exchange, config: BotConfig) -> None:
                     atr_series = atr(highs, lows, closes, config.atr_period)
                     rsi_series = rsi(closes, config.rsi_period)
                     last = df.iloc[-1]
+
+                    # *** NEW: Update dashboard metrics
                     state.last_price = float(last["close"])
                     state.atr = atr_series.iloc[-1]
                     state.rsi = rsi_series.iloc[-1]
                     state.donchian_upper = upper.iloc[-1]
                     state.donchian_lower = lower.iloc[-1]
 
+                    # *** NEW: Record candle in history
+                    state.add_candle(
+                        price=state.last_price,
+                        rsi=state.rsi,
+                        atr=state.atr,
+                        signal=None
+                    )
+
                 signal = generate_signal_for_symbol(df, config, symbol)
+
+                # *** NEW: Record signal in dashboard
                 if signal:
                     state.signal = signal.side
+                    state.add_candle(
+                        price=signal.entry_price,
+                        rsi=state.rsi,
+                        atr=state.atr,
+                        signal=signal.side
+                    )
 
                 if not signal:
                     log.debug("%s: no signal", symbol)
