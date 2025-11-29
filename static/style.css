@@ -1,0 +1,27 @@
+body {
+    background: #0b0f12;
+    color: #eee;
+    font-family: Arial, sans-serif;
+    padding: 20px;
+}
+
+.card {
+    background: #1a1f24;
+    padding: 20px;
+    margin-bottom: 20px;
+    border-radius: 8px;
+}
+
+.progress {
+    width: 100%;
+    background: #333;
+    height: 20px;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+#progress-bar {
+    height: 20px;
+    background: #00ffcc;
+    width: 0%;
+}

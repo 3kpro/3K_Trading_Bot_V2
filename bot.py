@@ -27,6 +27,8 @@ import ccxt  # type: ignore
 import numpy as np
 import pandas as pd
 from flask import Flask, jsonify  # type: ignore
+from dashboard.state import state
+from dashboard.server import run_dashboard
 
 
 # ---------------------------
@@ -433,7 +435,30 @@ def run_loop(exchange: ccxt.Exchange, config: BotConfig) -> None:
         for symbol in config.symbols:
             try:
                 df = fetch_ohlcv_df(exchange, symbol, config.timeframe, limit=200)
+
+                # Update state
+                state.symbol = symbol
+                state.warmup_progress = min(1.0, len(df) / 50)
+                state.ready = state.warmup_progress >= 1.0
+
+                if len(df) >= max(config.donchian_lookback, config.atr_period, config.rsi_period):
+                    highs = df["high"]
+                    lows = df["low"]
+                    closes = df["close"]
+                    upper, lower = donchian_channels(highs, lows, config.donchian_lookback)
+                    atr_series = atr(highs, lows, closes, config.atr_period)
+                    rsi_series = rsi(closes, config.rsi_period)
+                    last = df.iloc[-1]
+                    state.last_price = float(last["close"])
+                    state.atr = atr_series.iloc[-1]
+                    state.rsi = rsi_series.iloc[-1]
+                    state.donchian_upper = upper.iloc[-1]
+                    state.donchian_lower = lower.iloc[-1]
+
                 signal = generate_signal_for_symbol(df, config, symbol)
+                if signal:
+                    state.signal = signal.side
+
                 if not signal:
                     log.debug("%s: no signal", symbol)
                     continue
@@ -513,38 +538,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def create_dashboard(config: BotConfig) -> Flask:
-    """Create a simple web dashboard."""
-    app = Flask(__name__)
 
-    @app.route('/')
-    def index():
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>3K Trading Bot Dashboard</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; margin: 20px; }}
-                .status {{ background: #f0f0f0; padding: 20px; border-radius: 8px; }}
-            </style>
-        </head>
-        <body>
-            <h1>3K Trading Bot Dashboard</h1>
-            <div class="status">
-                <h2>Status</h2>
-                <p>Mode: {config.mode}</p>
-                <p>Symbols: {', '.join(config.symbols)}</p>
-                <p>Timeframe: {config.timeframe}</p>
-                <p>Equity: ${config.equity}</p>
-                <p>Risk Fraction: {config.risk_frac}</p>
-            </div>
-        </body>
-        </html>
-        """
-        return html
-
-    return app
 
 
 def main() -> None:
@@ -574,8 +568,9 @@ def main() -> None:
 
     # Start dashboard if not backtest
     if not args.backtest:
-        app = create_dashboard(config)
-        Thread(target=lambda: app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False), daemon=True).start()
+        state.equity = config.equity
+        state.equity_history = [config.equity]
+        Thread(target=run_dashboard, daemon=True).start()
         log.info("Dashboard available at http://localhost:5000")
 
     if mode == "backtest":

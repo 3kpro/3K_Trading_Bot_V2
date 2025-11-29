@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>3K Trading Bot Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<h1>3K Trading Bot Dashboard</h1>
+
+<div class="card">
+    <h2>Status</h2>
+    <p><strong>Symbol:</strong> <span id="symbol"></span></p>
+    <p><strong>Last Price:</strong> <span id="price"></span></p>
+    <p><strong>Signal:</strong> <span id="signal"></span></p>
+    <p><strong>Equity:</strong> <span id="equity"></span></p>
+    <p><strong>RSI:</strong> <span id="rsi"></span></p>
+    <p><strong>ATR:</strong> <span id="atr"></span></p>
+</div>
+
+<div class="card">
+    <h2>Warmup Status</h2>
+    <div class="progress">
+        <div id="progress-bar"></div>
+    </div>
+    <p id="ready-text"></p>
+</div>
+
+<div class="card">
+    <h2>Equity Curve</h2>
+    <canvas id="equityChart"></canvas>
+</div>
+
+<script>
+let chart;
+
+function fetchState() {
+    fetch("/state")
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById("symbol").innerText = data.symbol;
+            document.getElementById("price").innerText = data.last_price.toFixed(2);
+            document.getElementById("signal").innerText = data.signal || "None";
+            document.getElementById("equity").innerText = data.equity.toFixed(2);
+            document.getElementById("rsi").innerText = data.rsi.toFixed(2);
+            document.getElementById("atr").innerText = data.atr.toFixed(2);
+
+            // progress bar
+            let pct = data.warmup_progress * 100;
+            document.getElementById("progress-bar").style.width = pct + "%";
+            document.getElementById("ready-text").innerText = 
+                data.ready ? "READY TO TRADE" : "WARMING UP...";
+
+            // update chart
+            if (chart) {
+                chart.data.labels = data.equity_history.map((_, i) => i);
+                chart.data.datasets[0].data = data.equity_history;
+                chart.update();
+            }
+        });
+}
+
+function initChart() {
+    let ctx = document.getElementById("equityChart").getContext("2d");
+    chart = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: [],
+            datasets: [{
+                label: "Equity",
+                borderColor: "#00ffcc",
+                backgroundColor: "rgba(0,255,200,0.1)",
+                data: []
+            }]
+        },
+        options: {
+            responsive: true,
+            animation: { duration: 300 }
+        }
+    });
+}
+
+initChart();
+setInterval(fetchState, 2000);
+</script>
+
+</body>
+</html>
