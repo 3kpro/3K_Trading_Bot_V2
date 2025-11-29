@@ -1,0 +1,157 @@
+import os, sys, time, json, subprocess, argparse
+from dotenv import load_dotenv
+
+STATE_FILE = ".watch_state.json"
+
+# ---------- Beeper (optional local audio) ----------
+def beep(times=1):
+    try:
+        import winsound
+        for _ in range(times):
+            winsound.Beep(1000, 250)
+            time.sleep(0.15)
+    except Exception:
+        sys.stdout.write("\a" * times); sys.stdout.flush()
+
+# ---------- Telegram ----------
+def send_tg(msg: str) -> bool:
+    import urllib.request, urllib.parse, json as _json
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    chat  = os.getenv("TELEGRAM_CHAT_ID", "")
+    if not token or not chat:
+        print("[watch] Telegram not configured (missing TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID)")
+        return False
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    data = urllib.parse.urlencode({"chat_id": chat, "text": msg}).encode("utf-8")
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, data=data, method="POST"), timeout=10) as resp:
+            body = resp.read()
+            try:
+                obj = _json.loads(body.decode("utf-8", "ignore"))
+                ok = bool(obj.get("ok"))
+                if not ok:
+                    print(f"[watch] TG send failed: {obj}")
+                return ok
+            except Exception:
+                return True
+    except Exception as e:
+        print(f"[watch] TG error: {e}")
+        return False
+
+# ---------- State ----------
+def load_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            pass
+    return {"last_level": 0, "had_pos": False}
+
+def save_state(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f)
+
+# ---------- Targets snapshot via targets.py ----------
+def get_targets():
+    p = subprocess.run([sys.executable, "targets.py"], capture_output=True, text=True)
+    if p.returncode != 0:
+        return {"error": p.stderr.strip()}
+    try:
+        return json.loads(p.stdout)
+    except Exception as e:
+        return {"error": f"parse error: {e}", "raw": p.stdout[:300]}
+
+def level_from_progress(progress):
+    # 0,<1R ; 1,>=1R ; 2,>=2R ; 3,>=3R
+    if progress is None:
+        return 0
+    if progress >= 3: return 3
+    if progress >= 2: return 2
+    if progress >= 1: return 1
+    return 0
+
+def describe(data):
+    sym = data.get("symbol")
+    tf  = data.get("timeframe")
+    mark = data.get("mark")
+    entry = data.get("entry")
+    stop = data.get("stop")
+    pR = data.get("progress_in_R")
+    return f"{sym} {tf} | mark={mark} entry={entry} stop={stop} progress={pR}R"
+
+def main():
+    load_dotenv()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--interval", type=int, default=60, help="Seconds between checks")
+    ap.add_argument("--test", action="store_true", help="Send a test Telegram message and exit")
+    ap.add_argument("--once", action="store_true", help="Run one cycle then exit")
+    args = ap.parse_args()
+
+    if args.test:
+        # lightweight probe using env or a single snapshot
+        data = get_targets()
+        if "status" in data:
+            msg = f"🛰️ DS_Bot watcher TEST — {data['status']}"
+        elif "error" in data:
+            msg = f"🛰️ DS_Bot watcher TEST — error: {data['error']}"
+        else:
+            msg = f"🛰️ DS_Bot watcher TEST — {describe(data)}"
+        ok = send_tg(msg)
+        print(f"[watch] test sent: {ok}")
+        return
+
+    state = load_state()
+    print("[watch] started; interval =", args.interval)
+
+    while True:
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        data = get_targets()
+
+        # Handle errors / no position
+        if "error" in data:
+            print(f"[{ts}] watcher: {data['error']}")
+            time.sleep(args.interval)
+            if args.once: break
+            continue
+
+        if "status" in data:
+            print(f"[{ts}] watcher: {data['status']}")
+            # If we previously had a position, notify close
+            if state.get("had_pos", False):
+                send_tg(f"⚪ Position closed — {data.get('symbol')} {data.get('timeframe')}")
+                beep(1)
+                state["had_pos"] = False
+                state["last_level"] = 0
+                save_state(state)
+            time.sleep(args.interval)
+            if args.once: break
+            continue
+
+        # We have an open position snapshot
+        print(f"[{ts}] {describe(data)}")
+        state["had_pos"] = True
+
+        # Level alerts
+        pR  = data.get("progress_in_R")
+        lvl = level_from_progress(pR)
+        last = state.get("last_level", 0)
+
+        if lvl > last:
+            send_tg(f"✅ +{lvl}R reached — {describe(data)}")
+            beep(lvl)
+            state["last_level"] = lvl
+            save_state(state)
+
+        # Stop alert
+        stop = data.get("stop")
+        mark = data.get("mark")
+        if stop is not None and mark is not None and mark <= stop:
+            send_tg(f"🛑 STOP touched/breached — {describe(data)}")
+            beep(2)
+
+        if args.once: break
+        time.sleep(args.interval)
+
+if __name__ == "__main__":
+    main()

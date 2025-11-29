@@ -1,0 +1,381 @@
+# bot.py
+# Clean baseline with Donchian breakout (20/10), ATR(14)*3 stops, RSI regime filter.
+# Backtests use FractionalBacktest. Live engine has +1R partial take-profit (sell 50% once).
+
+import os, sys, time, json, math, argparse, csv, signal
+from datetime import datetime, timezone
+import numpy as np
+import pandas as pd
+from dotenv import load_dotenv
+
+# TA + Backtesting
+import ta
+from backtesting import Strategy
+from backtesting.lib import FractionalBacktest as Backtest  # fractional sizing
+# Exchange connector
+import ccxt
+
+# ---------- Utils ----------
+def jprint(obj): print(json.dumps(obj, ensure_ascii=False))
+def utcnow_iso(): return datetime.now(timezone.utc).isoformat()
+def ensure_dir(p): os.makedirs(p, exist_ok=True)
+def round_step(value, step):
+    if not step: return value
+    return math.floor(value / step) * step
+
+# ---------- Data ----------
+def fetch_ohlcv_df(ex, symbol, tf, limit=1000):
+    raw = ex.fetch_ohlcv(symbol, timeframe=tf, limit=limit)
+    df = pd.DataFrame(raw, columns=["time","open","high","low","close","volume"])
+    df["time"] = pd.to_datetime(df["time"], unit="ms", utc=True)
+    return df
+
+def add_indicators(df: pd.DataFrame):
+    df = df.copy()
+    df["ema20"] = ta.trend.EMAIndicator(df["close"], window=20).ema_indicator()
+    df["ema50"] = ta.trend.EMAIndicator(df["close"], window=50).ema_indicator()
+    df["rsi"]   = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
+    df["atr"]   = ta.volatility.AverageTrueRange(df["high"], df["low"], df["close"], window=14).average_true_range()
+    return df
+
+# ---------- Risk (live/paper engine only) ----------
+class Risk:
+    def __init__(self, equity: float, risk_frac: float, max_daily_loss_frac: float):
+        self.equity = equity
+        self.start_equity = equity
+        self.risk_frac = risk_frac
+        self.max_daily_loss_frac = max_daily_loss_frac
+
+    def position_size(self, entry: float, stop: float, lot_step=None, min_qty=None, max_qty=None):
+        risk_per_trade = self.equity * self.risk_frac
+        risk_per_unit = abs(entry - stop)
+        if risk_per_unit <= 0: return 0.0
+        qty = risk_per_trade / risk_per_unit
+        if lot_step: qty = round_step(qty, lot_step)
+        if min_qty: qty = max(qty, min_qty)
+        if max_qty: qty = min(qty, max_qty)
+        return max(0.0, qty)
+
+    def breached(self, realized_pnl):
+        dd = (self.start_equity - (self.start_equity + realized_pnl)) / self.start_equity
+        return dd >= self.max_daily_loss_frac
+
+# ---------- Backtest Strategy ----------
+class BaselineStrategy(Strategy):
+    # Donchian breakout with ATR stop and RSI regime filter
+    entry_n = 20
+    exit_n = 10
+    atr_mult = 3.0
+    risk_frac = 0.01      # 1% of equity per signal (fractional backtester)
+    rsi_floor = 52        # filter longs if RSI below this; shorts need RSI <= (100 - rsi_floor)
+
+    def init(self):
+        close = self.data.Close
+        high  = self.data.High
+        low   = self.data.Low
+
+        # Donchian bands
+        def donchian_h(h, n): return pd.Series(h).rolling(int(n)).max().values
+        def donchian_l(l, n): return pd.Series(l).rolling(int(n)).min().values
+        self.dc_high = self.I(donchian_h, high, self.entry_n)
+        self.dc_low  = self.I(donchian_l, low,  self.entry_n)
+        self.exit_high = self.I(donchian_h, high, self.exit_n)
+        self.exit_low  = self.I(donchian_l, low,  self.exit_n)
+
+        # ATR(14)
+        def atr14(h, l, c):
+            h = pd.Series(h); l = pd.Series(l); c = pd.Series(c)
+            tr = pd.concat([(h - l), (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
+            return tr.rolling(14).mean().values
+        self.atr = self.I(atr14, high, low, close)
+
+        # RSI(14)
+        def rsi14(x):
+            s = pd.Series(x); d = s.diff()
+            up = (d.where(d > 0, 0)).rolling(14).mean()
+            dn = (-d.where(d < 0, 0)).rolling(14).mean()
+            rs = up / dn.replace(0, np.nan)
+            return (100 - (100 / (1 + rs))).fillna(50).values
+        self.rsi = self.I(rsi14, close)
+
+    def next(self):
+        price = self.data.Close[-1]
+        dc_h = self.dc_high[-1]; dc_l = self.dc_low[-1]
+        xh = self.exit_high[-1]; xl = self.exit_low[-1]
+        atr = self.atr[-1]; rsi = self.rsi[-1]
+
+        if np.isnan([dc_h, dc_l, xh, xl, atr, rsi]).any():
+            return
+        # volatility sanity: trade only if ATR > 0.15% of price
+        if atr < 0.0015 * price:
+            return
+
+        # exits
+        if self.position.is_long and price <= xl:
+            self.position.close()
+        if self.position.is_short and price >= xh:
+            self.position.close()
+
+        # entries (breakout)
+        size_frac = max(0.002, min(self.risk_frac, 0.02))
+        long_ok  = (price >= dc_h) and (rsi >= self.rsi_floor)
+        short_ok = (price <= dc_l) and (rsi <= (100 - self.rsi_floor))
+
+        if not self.position and long_ok:
+            self.buy(size=size_frac, sl=price - self.atr_mult * atr)
+        elif not self.position and short_ok:
+            self.sell(size=size_frac, sl=price + self.atr_mult * atr)
+
+# ---------- Live/Paper Engine ----------
+class Engine:
+    def __init__(self, args):
+        self.args = args
+        load_dotenv()
+        self.exchange_id = os.getenv("EXCHANGE", "kraken")
+        self.api_key = os.getenv("API_KEY", "")
+        self.api_secret = os.getenv("API_SECRET", "")
+        self.password = os.getenv("API_PASSWORD", None) or os.getenv("PASSPHRASE", None)
+        self.symbol = os.getenv("SYMBOL", "SOL/USD")
+        self.timeframe = os.getenv("TIMEFRAME", "1h")
+        self.min_volume = float(os.getenv("MIN_VOLUME", "50"))
+        self.max_spread = float(os.getenv("MAX_SPREAD", "0.001"))
+        self.risk_frac = float(os.getenv("RISK_FRAC", "0.005"))
+        self.max_daily_loss = float(os.getenv("MAX_DAILY_LOSS", "0.03"))
+        self.equity = float(os.getenv("EQUITY", "1000"))
+        self.paper = (not args.live)
+        self.log_dir = "logs"; ensure_dir(self.log_dir)
+        self.trades_csv = os.path.join(self.log_dir, "trades.csv")
+        self.tg_token = os.getenv("TELEGRAM_BOT_TOKEN","")
+        self.tg_chat  = os.getenv("TELEGRAM_CHAT_ID","")
+
+        ex_class = getattr(ccxt, self.exchange_id)
+        self.ex = ex_class({
+            "apiKey": self.api_key,
+            "secret": self.api_secret,
+            "password": self.password,
+            "enableRateLimit": True,
+            "options": {"defaultType": "spot"}
+        })
+        self.ex.load_markets()
+        m = self.ex.market(self.symbol)
+        self.price_step = m.get("precision", {}).get("price", None)
+        self.qty_step = m.get("precision", {}).get("amount", None)
+        self.min_qty = m.get("limits", {}).get("amount", {}).get("min", None)
+        self.max_qty = m.get("limits", {}).get("amount", {}).get("max", None)
+
+        self.realized_pnl = 0.0
+        self.position = 0.0
+        self.entry_price = None
+        self.kill = False
+        self.tp1_done = False
+        signal.signal(signal.SIGINT, lambda *_: setattr(self, "kill", True))
+
+        if not os.path.exists(self.trades_csv):
+            with open(self.trades_csv, "w", newline="") as f:
+                csv.writer(f).writerow(["ts","mode","symbol","side","qty","price","pnl","equity"])
+
+    def _send_tg(self, html: str) -> bool:
+        if not getattr(self, "tg_token", "") or not getattr(self, "tg_chat", ""):
+            return False
+        try:
+            import urllib.request, urllib.parse, json as _json
+            url = f"https://api.telegram.org/bot{self.tg_token}/sendMessage"
+            data = urllib.parse.urlencode({
+                "chat_id": self.tg_chat,
+                "text": html,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": "true"
+            }).encode("utf-8")
+            with urllib.request.urlopen(urllib.request.Request(url, data=data, method="POST"), timeout=10) as resp:
+                body = resp.read().decode("utf-8","ignore")
+                try:
+                    obj = _json.loads(body)
+                    return bool(obj.get("ok", False))
+                except Exception:
+                    return True
+        except Exception as e:
+            jprint({"event":"error","msg":f"tg_send: {e}"})
+            return False
+
+    def _notify_trade_html(self, side, qty, price, pnl, equity):
+        try:
+            p = 0.0 if pnl is None else float(pnl)
+        except:
+            p = 0.0
+        up = "🟢" if p>0 else ("🔴" if p<0 else "⚪")
+        html = (
+            f"<b>{up} Trade</b>\n"
+            f"<b>{self.symbol}</b> <code>{self.timeframe}</code>\n"
+            f"• Side: <b>{side}</b>\n"
+            f"• Qty: <b>{qty:.6f}</b>\n"
+            f"• Price: <b>{price:.6f}</b>\n"
+            f"• PnL: <b>{p:.2f}</b>\n"
+            f"• Equity: <b>{equity:.2f}</b>"
+        )
+        self._send_tg(html)
+
+    def log_trade(self, side, qty, price, pnl=0.0):
+        self.realized_pnl += pnl
+        eq = self.equity + self.realized_pnl
+        with open(self.trades_csv, "a", newline="") as f:
+            csv.writer(f).writerow([utcnow_iso(), "PAPER" if self.paper else "LIVE", self.symbol, side, qty, price, pnl, eq])
+        jprint({"t": utcnow_iso(), "event": "trade", "mode": "paper" if self.paper else "live",
+                "symbol": self.symbol, "side": side, "qty": qty, "price": price, "pnl": pnl, "equity": eq})
+        # Telegram notify (HTML)
+        try:
+            self._notify_trade_html(side, qty, price, pnl, eq)
+        except Exception as _e:
+            jprint({"event":"warn","msg":f"notify_trade failed: {_e}"})
+
+    def spread_ok(self, ticker):
+        bid = ticker.get("bid"); ask = ticker.get("ask")
+        if not bid or not ask: return False
+        spread = (ask - bid)/ask
+        return spread <= self.max_spread
+
+    def volume_ok(self, df):
+        return df["volume"].iloc[-1] >= self.min_volume
+
+    def loop(self):
+        jprint({"event":"start","mode":"paper" if self.paper else "live","symbol":self.symbol,"tf":self.timeframe})
+        risk = Risk(self.equity, self.risk_frac, self.max_daily_loss)
+
+        while not self.kill:
+            try:
+                ticker = self.ex.fetch_ticker(self.symbol)
+                if not self.spread_ok(ticker):
+                    time.sleep(5); continue
+
+                df = add_indicators(fetch_ohlcv_df(self.ex, self.symbol, self.timeframe, limit=200))
+                if not self.volume_ok(df):
+                    time.sleep(5); continue
+
+                row = df.iloc[-1]
+                price, ema20, ema50, rsi, atr = row["close"], row["ema20"], row["ema50"], row["rsi"], row["atr"]
+                if any(pd.isna([ema20, ema50, rsi, atr])):
+                    time.sleep(5); continue
+
+                # --- TP1: take half at +1R (R = 3*ATR), once per position ---
+                if self.position != 0 and self.entry_price is not None and not pd.isna(atr):
+                    R = 3.0*atr
+                    # Long TP1
+                    if self.position > 0 and (price >= self.entry_price + R) and not self.tp1_done:
+                        qty_close = round(abs(self.position) * 0.5, 10)
+                        if qty_close > 0:
+                            pnl = (price - self.entry_price) * qty_close
+                            if self.paper:
+                                self.position -= qty_close
+                                self.log_trade("SELL_TP1", qty_close, price, pnl)
+                            else:
+                                order = self.ex.create_order(self.symbol, "market", "sell", qty_close)
+                                fill_price = order.get("price") or price
+                                pnl = (fill_price - self.entry_price) * qty_close
+                                self.position -= qty_close
+                                self.log_trade("SELL_TP1", qty_close, fill_price, pnl)
+                            self.tp1_done = True
+
+                long_sig  = ema20 > ema50 and rsi > 50
+                short_sig = ema20 < ema50 and rsi < 50
+
+                # manage existing pos with ATR*3 stops
+                if self.position != 0 and self.entry_price is not None and not pd.isna(atr):
+                    if self.position > 0:
+                        stop = self.entry_price - 3.0*atr
+                        if price <= stop:
+                            pnl = (price - self.entry_price) * self.position
+                            self.log_trade("SELL_STOP", self.position, price, pnl)
+                            self.position = 0; self.entry_price = None; self.tp1_done = False
+                    else:
+                        stop = self.entry_price + 3.0*atr
+                        if price >= stop:
+                            pnl = (self.entry_price - price) * abs(self.position)
+                            self.log_trade("BUY_STOP", abs(self.position), price, pnl)
+                            self.position = 0; self.entry_price = None; self.tp1_done = False
+
+                # entries
+                if self.position == 0 and not pd.isna(atr):
+                    if long_sig:
+                        stop = price - 3.0*atr
+                        qty = risk.position_size(price, stop, self.qty_step, self.min_qty, self.max_qty)
+                        if qty > 0:
+                            if self.paper:
+                                self.position = qty; self.entry_price = price
+                                self.log_trade("BUY", qty, price, 0.0)
+                                self.tp1_done = False
+                            else:
+                                order = self.ex.create_order(self.symbol, "market", "buy", qty)
+                                fill_price = order.get("price") or price
+                                self.position = qty; self.entry_price = fill_price
+                                self.log_trade("BUY", qty, fill_price, 0.0)
+                                self.tp1_done = False
+                    elif short_sig:
+                        # Shorting path kept for completeness; strategy is long-biased with RSI filter.
+                        stop = price + 3.0*atr
+                        qty = risk.position_size(price, stop, self.qty_step, self.min_qty, self.max_qty)
+                        if qty > 0:
+                            qty = -qty
+                            if self.paper:
+                                self.position = qty; self.entry_price = price
+                                self.log_trade("SELL", abs(qty), price, 0.0)
+                                self.tp1_done = False
+                            else:
+                                order = self.ex.create_order(self.symbol, "market", "sell", abs(qty))
+                                fill_price = order.get("price") or price
+                                self.position = qty; self.entry_price = fill_price
+                                self.log_trade("SELL", abs(qty), fill_price, 0.0)
+                                self.tp1_done = False
+
+                # equity kill-switch check
+                if self.position != 0 and self.entry_price is not None:
+                    pnl = (price - self.entry_price) * (self.position if self.position>0 else -abs(self.position))
+                    if risk.breached(self.realized_pnl + pnl):
+                        side = "SELL" if self.position > 0 else "BUY"
+                        self.log_trade(f"{side}_KILLSWITCH", abs(self.position), price, pnl)
+                        self.position = 0; self.entry_price = None; self.tp1_done = False
+                        jprint({"event":"killswitch","reason":"max_daily_loss"}); break
+
+                time.sleep(5)
+            except Exception as e:
+                jprint({"event":"error","msg":str(e)})
+                time.sleep(2)
+
+# ---------- Backtest ----------
+def run_backtest(symbol: str, tf: str, exchange_id: str):
+    ex = getattr(ccxt, exchange_id)({"enableRateLimit": True})
+    ex.load_markets()
+    df = fetch_ohlcv_df(ex, symbol, tf, limit=2000)
+
+    df_bt = df.rename(columns={"time":"Date","open":"Open","high":"High","low":"Low","close":"Close","volume":"Volume"})
+    df_bt.set_index("Date", inplace=True)
+
+    bt = Backtest(df_bt, BaselineStrategy, cash=10_000, commission=0.0007, finalize_trades=True)
+    stats = bt.run()
+    print(stats)
+
+    out = "logs/backtest_stats.txt"
+    ensure_dir("logs")
+    with open(out, "w", encoding="utf-8") as f: f.write(str(stats))
+    print(f"Backtest saved to {out}")
+
+# ---------- CLI ----------
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--backtest", action="store_true", help="Run backtest then exit")
+    ap.add_argument("--live", action="store_true", help="Run live (default is paper)")
+    args = ap.parse_args()
+
+    if args.backtest:
+        load_dotenv()
+        run_backtest(
+            os.getenv("SYMBOL","BTC/USD"),
+            os.getenv("TIMEFRAME","1h"),
+            os.getenv("EXCHANGE","kraken")
+        )
+        return
+
+    Engine(args).loop()
+
+if __name__ == "__main__":
+    main()
+
+

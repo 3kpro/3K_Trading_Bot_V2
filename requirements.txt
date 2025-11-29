@@ -1,0 +1,10 @@
+python-dotenv
+numpy
+pandas
+ta
+backtesting
+ccxt
+scikit-learn
+flask
+keyring
+pytest

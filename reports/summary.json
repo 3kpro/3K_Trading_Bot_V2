@@ -1,0 +1,10 @@
+{
+  "trades_closed": 0,
+  "win_rate_pct": 0.0,
+  "avg_win": 0.0,
+  "avg_loss": 0.0,
+  "expectancy_per_trade": 0.0,
+  "profit_factor": 0.0,
+  "pnl_sum": 0,
+  "max_drawdown_pct": 0.0
+}
