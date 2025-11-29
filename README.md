@@ -1,5 +1,9 @@
 # 3K Trading Bot V2.1
 
+[![CI](https://github.com/3kpro/3K_Trading_Bot_V2/actions/workflows/ci.yml/badge.svg)](https://github.com/3kpro/3K_Trading_Bot_V2/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+
 A professional-grade cryptocurrency trading bot implementing a Donchian channel breakout strategy with ATR-based stops, RSI regime filtering, and comprehensive risk management. Supports backtesting, paper trading, live trading, multi-symbol operations, and a real-time web dashboard.
 
 ## 🚀 Features
