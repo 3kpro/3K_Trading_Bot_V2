@@ -3,7 +3,7 @@ from dashboard.state import state
 import os
 
 app = Flask(__name__,
-            template_folder='dashboard',
+            template_folder='.',
             static_folder='static')
 
 @app.route("/")
