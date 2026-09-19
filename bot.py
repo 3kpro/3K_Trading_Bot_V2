@@ -167,8 +167,8 @@ def fetch_ohlcv_df(
 def donchian_channels(
     highs: pd.Series, lows: pd.Series, lookback: int
 ) -> Tuple[pd.Series, pd.Series]:
-    upper = highs.rolling(window=lookback, min_periods=lookback).max()
-    lower = lows.rolling(window=lookback, min_periods=lookback).min()
+    upper = highs.shift(1).rolling(window=lookback, min_periods=lookback).max()
+    lower = lows.shift(1).rolling(window=lookback, min_periods=lookback).min()
     return upper, lower
 
 
@@ -429,7 +429,9 @@ def run_loop(exchange: ccxt.Exchange, config: BotConfig) -> None:
     - In LIVE mode, this is where you would send real orders
     """
     log.info("Starting %s mode loop", config.mode)
-    dry_run = config.mode != "live"
+    if config.mode == "live":
+        raise NotImplementedError("Live order execution is not implemented; use paper mode.")
+    dry_run = True
 
     # *** NEW: Set mode flags for dashboard
     state.backtest_mode = (config.mode == "backtest")
@@ -538,7 +540,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--live",
         action="store_true",
-        help="Enable LIVE mode (requires working API keys)",
+        help="Reserved for future live trading; currently disabled",
     )
     parser.add_argument(
         "--symbols",
