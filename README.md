@@ -1,148 +1,59 @@
-# 3K Trading Bot V2.1
+# 3K Trading Bot
 
-[![CI](https://github.com/3kpro/3K_Trading_Bot_V2/actions/workflows/ci.yml/badge.svg)](https://github.com/3kpro/3K_Trading_Bot_V2/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+A Python research project for exploring Donchian channel breakouts on cryptocurrency candle data. It fetches OHLCV data with CCXT, calculates ATR and RSI, runs a simple historical simulation, and displays monitoring data in a local Flask dashboard.
 
-A professional-grade cryptocurrency trading bot implementing a Donchian channel breakout strategy with ATR-based stops, RSI regime filtering, and comprehensive risk management. Supports backtesting, paper trading, live trading, multi-symbol operations, and a real-time web dashboard.
+**Project status:** Experimental. Backtests omit trading fees, slippage, and realistic order fills. Paper mode logs hypothetical signals; it does not maintain a simulated exchange account. Live order execution is intentionally disabled. Do not use this project to make real trades.
 
-## 🚀 Features
+## What works
 
-- **Strategy**: Donchian breakout with ATR stops and RSI filter
-- **Backtesting**: Parameter optimization and walk-forward analysis
-- **Trading Modes**: Paper (simulation), Live (real money)
-- **Risk Management**: Position sizing, circuit breakers, drawdown control
-- **Multi-Symbol**: Trade multiple pairs simultaneously
-- **Web Dashboard**: Real-time monitoring with charts and readiness score
-- **Logging & Notifications**: Structured logging and Telegram alerts
-- **Docker Support**: Containerized deployment
-- **Type Safety**: Full type hints for reliability
+- Historical OHLCV retrieval through CCXT and a single-symbol backtest per configured pair.
+- Donchian breakout signals against the **previous** candles, with ATR-based stop distance, RSI filtering, and risk-based hypothetical size.
+- Continuous signal monitoring in paper mode, with a local dashboard at `http://localhost:5000`.
+- Docker packaging and automated tests for channel timing, signal generation, backtest entry, and rejection of live mode.
 
-## 📊 Architecture
+## Run locally
 
-```
-3K_Trading_Bot_V2/
-├── bot.py              # CLI entry point & main loop
-├── config.py           # Configuration management
-├── data.py             # Data fetching & indicators
-├── strategy.py         # Signal generation logic
-├── execution.py        # Order routing & position tracking
-├── risk.py             # Sizing & risk controls
-├── report.py           # Performance reporting
-├── status.py           # Health checks
-├── targets.py          # Symbol watchlists
-├── watch_targets.py    # Alert monitoring
-├── requirements.txt
-├── Dockerfile
-├── tests/              # Unit & integration tests
-└── reports/            # Generated reports & logs
-```
+Requires Python 3.9+.
 
-## 🛠️ Requirements
-
-- Python 3.9+
-- Dependencies: `pip install -r requirements.txt`
-
-## ⚙️ Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/3kpro/3K_Trading_Bot_V2.git
-   cd 3K_Trading_Bot_V2
-   ```
-
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Configure environment**
-   Create a `.env` file or set environment variables:
-   ```env
-   EXCHANGE=kraken
-   SYMBOLS=BTC/USDT,ETH/USDT
-   TIMEFRAME=1h
-   EQUITY=1000
-   RISK_FRAC=0.005
-   API_KEY=your_api_key
-   API_SECRET=your_api_secret
-   TELEGRAM_BOT_TOKEN=your_bot_token
-   TELEGRAM_CHAT_ID=your_chat_id
-   ```
-
-## 🎯 Usage
-
-### Backtesting
 ```bash
-# Basic backtest
+git clone https://github.com/3kpro/3K_Trading_Bot_V2.git
+cd 3K_Trading_Bot_V2
+python -m venv .venv
+# Linux/macOS: source .venv/bin/activate
+# Windows PowerShell: .venv\\Scripts\\Activate.ps1
+python -m pip install -r requirements.txt
+python -m pytest tests/ -q
 python bot.py --backtest
-
-# With walk-forward analysis
-python bot.py --backtest --walkforward
-
-# Override parameters
-python bot.py --backtest --symbols BTC/USDT --timeframe 4h
-```
-
-### Paper Trading (Simulation)
-```bash
 python bot.py
 ```
 
-### Live Trading
-```bash
-python bot.py --live
+Defaults: Kraken, SOL/USD, 1h candles, 1000 units of starting equity, 0.5% hypothetical risk per trade. Change the exchange, symbols, timeframe, and risk settings through environment variables:
+
+```text
+EXCHANGE=kraken
+SYMBOLS=SOL/USD,BTC/USD
+TIMEFRAME=1h
+EQUITY=1000
+RISK_FRAC=0.005
+DONCHIAN_LOOKBACK=20
+ATR_PERIOD=14
+RSI_PERIOD=14
+RSI_MIN=0
+RSI_MAX=100
 ```
 
-### Web Dashboard
-Start the bot and visit `http://localhost:5000` for real-time monitoring.
+You can also override symbols, timeframe, equity, and risk fraction with `--symbols`, `--timeframe`, `--equity`, and `--risk-frac`. The `--live` option is reserved and raises an error; supplying exchange keys does not enable orders.
 
-## 📈 Strategy Details
+## How the strategy is evaluated
 
-- **Entry**: Close breaks above/below Donchian channel (20-period)
-- **Filter**: RSI between 35-70
-- **Stop Loss**: 2x ATR from entry
-- **Position Sizing**: Risk 0.5% of equity per trade
-- **Exit**: Stop hit or opposite breakout
+A close above the highest high of the preceding `DONCHIAN_LOOKBACK` candles indicates a long signal; a close below the preceding lowest low indicates a short signal. RSI must be within the configured range. The hypothetical stop is two ATR units from entry and position size is starting or current simulated equity times `RISK_FRAC`, divided by stop distance.
 
-## 🐳 Docker
+The backtest is deliberately simple: it enters and checks stop exits at candle closes, does not model fees or slippage, and does not establish whether the strategy is profitable. Results for multiple symbols are computed independently and their P&L is summed; they do not share a portfolio or capital constraint. Treat the output as a code experiment, not a performance claim.
 
-```bash
-# Build
-docker build -t 3k-trading-bot .
+## Contribute
 
-# Run paper trading
-docker run --env-file .env 3k-trading-bot
+Issues and pull requests are welcome. Good first contributions include realistic fill and fee modeling, persistent paper positions, stronger risk limits, and tests for short signals and edge cases. See [CONTRIBUTING.md](CONTRIBUTING.md). Never include API keys, account data, or private trading history in an issue.
 
-# Run live trading
-docker run --env-file .env 3k-trading-bot python bot.py --live
-```
+## License
 
-## 🧪 Testing
-
-```bash
-pytest tests/
-```
-
-## 📊 Monitoring
-
-- **Dashboard**: Real-time equity chart, position status, trade history
-- **Readiness Score**: Checklist for live trading readiness
-- **Logs**: Structured logging to console and files
-- **Telegram**: Trade notifications and alerts
-
-## ⚠️ Disclaimer
-
-This software is for educational and research purposes only. Trading cryptocurrencies involves substantial risk of loss and is not suitable for all investors. Past performance does not guarantee future results. Use at your own risk.
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
-
-## 📄 License
-
-MIT License - see LICENSE file for details.
+[MIT](LICENSE).
